@@ -1,5 +1,6 @@
 package com.narro.app.feature
 
+import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.os.Build
 import android.provider.Settings
@@ -8,10 +9,12 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.keyframes
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -46,6 +49,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.Fingerprint
+import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
@@ -61,6 +65,7 @@ import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedIconButton
@@ -98,11 +103,13 @@ import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.core.net.toUri
+import com.narro.app.BuildConfig
 import com.narro.app.R
 import com.narro.app.domain.model.Bookmark
 import com.narro.app.domain.model.Document
@@ -112,12 +119,13 @@ import com.narro.app.domain.model.ReadingPosition
 import com.narro.app.playback.model.PlaybackStatus
 import com.narro.app.playback.service.TtsPlaybackService
 import com.narro.app.security.PinVerification
+import java.net.URI
 import java.text.DateFormat
 import java.util.Date
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
-private enum class Destination { DOCUMENTS, READER, BOOKMARKS, SETTINGS }
+private enum class Destination { DOCUMENTS, READER, BOOKMARKS, SETTINGS, SUPPORT }
 
 internal enum class LockToggleAction {
     REGISTER_NEW_PIN,
@@ -146,6 +154,14 @@ internal fun playbackStartPosition(
     currentPosition: ReadingPosition,
 ): ReadingPosition = selectedPosition ?: currentPosition
 
+internal fun isTrustedKoFiUrl(rawUrl: String): Boolean {
+    if (rawUrl.isBlank()) return false
+    val uri = runCatching { URI(rawUrl) }.getOrNull() ?: return false
+    val host = uri.host?.lowercase() ?: return false
+    return uri.scheme.equals("https", ignoreCase = true) &&
+        (host == "ko-fi.com" || host.endsWith(".ko-fi.com"))
+}
+
 @Composable
 fun NarroApp(
     viewModel: AppViewModel,
@@ -161,6 +177,7 @@ fun NarroApp(
     val importProgress by viewModel.importProgress.collectAsStateWithLifecycle()
     val duplicate by viewModel.duplicate.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
+    val appScope = rememberCoroutineScope()
     var destination by rememberSaveable { mutableStateOf(Destination.DOCUMENTS) }
     var lockState by rememberSaveable { mutableStateOf<Boolean?>(null) }
     var showPinRegistration by rememberSaveable { mutableStateOf(false) }
@@ -198,10 +215,14 @@ fun NarroApp(
     }
 
     BackHandler(destination != Destination.DOCUMENTS) {
-        if (destination == Destination.READER) {
-            TtsPlaybackService.command(context, TtsPlaybackService.ACTION_STOP_SAVE)
+        when (destination) {
+            Destination.READER -> {
+                TtsPlaybackService.command(context, TtsPlaybackService.ACTION_STOP_SAVE)
+                destination = Destination.DOCUMENTS
+            }
+            Destination.SUPPORT -> destination = Destination.SETTINGS
+            else -> destination = Destination.DOCUMENTS
         }
-        destination = Destination.DOCUMENTS
     }
 
     Scaffold(
@@ -295,6 +316,7 @@ fun NarroApp(
                     lockEnabled = settings.lockEnabled,
                     biometricEnabled = settings.biometricEnabled,
                     onBack = { destination = Destination.DOCUMENTS },
+                    onSupport = { destination = Destination.SUPPORT },
                     onSpeechRate = viewModel::setSpeechRate,
                     onLockToggle = { enabled ->
                         when (lockToggleAction(enabled)) {
@@ -306,6 +328,29 @@ fun NarroApp(
                         if (!enabled) viewModel.setBiometricEnabled(false)
                         else authenticateBiometric { success ->
                             if (success) viewModel.setBiometricEnabled(true)
+                        }
+                    },
+                )
+                Destination.SUPPORT -> SupportScreen(
+                    onBack = { destination = Destination.SETTINGS },
+                    onOpenKoFi = { _ ->
+                        val koFiUrl = BuildConfig.KO_FI_URL
+                        if (koFiUrl.isBlank()) {
+                            appScope.launch {
+                                snackbar.showSnackbar(resources.getString(R.string.msg_056))
+                            }
+                        } else if (!isTrustedKoFiUrl(koFiUrl)) {
+                            appScope.launch {
+                                snackbar.showSnackbar(resources.getString(R.string.err_061))
+                            }
+                        } else {
+                            try {
+                                context.startActivity(Intent(Intent.ACTION_VIEW, koFiUrl.toUri()))
+                            } catch (_: ActivityNotFoundException) {
+                                appScope.launch {
+                                    snackbar.showSnackbar(resources.getString(R.string.err_061))
+                                }
+                            }
                         }
                     },
                 )
@@ -505,8 +550,21 @@ private fun ReaderScreen(
             it.segmentIndex == state.centerSegmentIndex
         }
         val targetKey = displayItems.getOrNull(item)?.key
-        val visibleKeys = listState.layoutInfo.visibleItemsInfo.map { it.key }
-        if (targetKey != null && shouldScrollToReadingItem(targetKey, visibleKeys)) {
+        val layoutInfo = listState.layoutInfo
+        val visibleItems = layoutInfo.visibleItemsInfo.map {
+            ReadingItemViewport(
+                key = it.key,
+                offset = it.offset,
+                size = it.size,
+            )
+        }
+        if (targetKey != null && shouldScrollToReadingItem(
+                targetKey = targetKey,
+                visibleItems = visibleItems,
+                viewportStartOffset = layoutInfo.viewportStartOffset,
+                viewportEndOffset = layoutInfo.viewportEndOffset,
+            )
+        ) {
             listState.scrollToItem(item)
         }
     }
@@ -691,6 +749,7 @@ private fun SettingsScreen(
     lockEnabled: Boolean,
     biometricEnabled: Boolean,
     onBack: () -> Unit,
+    onSupport: () -> Unit,
     onSpeechRate: (Float) -> Unit,
     onLockToggle: (Boolean) -> Unit,
     onBiometricToggle: (Boolean) -> Unit,
@@ -751,6 +810,273 @@ private fun SettingsScreen(
                 }
             }
             item { Text(stringResource(R.string.backup_summary), color = MaterialTheme.colorScheme.onSurfaceVariant) }
+            item { HorizontalDivider() }
+            item {
+                Text(
+                    stringResource(R.string.information_and_support),
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+                Spacer(Modifier.height(12.dp))
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(stringResource(R.string.app_version), style = MaterialTheme.typography.titleMedium)
+                    Text(
+                        stringResource(
+                            R.string.app_version_value,
+                            BuildConfig.VERSION_NAME,
+                            BuildConfig.VERSION_CODE,
+                        ),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Spacer(Modifier.height(16.dp))
+                Card(
+                    onClick = onSupport,
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.primaryContainer,
+                    ),
+                ) {
+                    Row(
+                        Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 18.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Surface(
+                            modifier = Modifier.size(44.dp),
+                            shape = CircleShape,
+                            color = MaterialTheme.colorScheme.primary,
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    Icons.Default.Favorite,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.onPrimary,
+                                    modifier = Modifier.size(22.dp),
+                                )
+                            }
+                        }
+                        Spacer(Modifier.width(14.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                stringResource(R.string.support_narro),
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.SemiBold,
+                            )
+                            Text(
+                                stringResource(R.string.support_narro_summary),
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        Icon(
+                            Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                            contentDescription = null,
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun SupportScreen(
+    onBack: () -> Unit,
+    onOpenKoFi: (Int) -> Unit,
+) {
+    var selectedAmount by rememberSaveable { mutableStateOf<Int?>(null) }
+    val options = listOf(
+        Triple(1, R.string.support_light_title, R.string.support_light_summary),
+        Triple(2, R.string.support_warm_title, R.string.support_warm_summary),
+        Triple(3, R.string.support_strong_title, R.string.support_strong_summary),
+    )
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text(stringResource(R.string.support_narro)) },
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.back))
+                    }
+                },
+            )
+        },
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
+    ) { padding ->
+        LazyColumn(
+            Modifier.fillMaxSize().padding(padding),
+            contentPadding = PaddingValues(horizontal = 20.dp, vertical = 24.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            item {
+                Surface(
+                    modifier = Modifier.size(88.dp),
+                    shape = CircleShape,
+                    color = MaterialTheme.colorScheme.primaryContainer,
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            Icons.Default.Favorite,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(44.dp),
+                        )
+                    }
+                }
+            }
+            item {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(
+                        stringResource(R.string.support_headline),
+                        style = MaterialTheme.typography.headlineSmall,
+                        fontWeight = FontWeight.Bold,
+                    )
+                    Spacer(Modifier.height(10.dp))
+                    Text(
+                        stringResource(R.string.support_description),
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = TextAlign.Center,
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        stringResource(R.string.support_emotional_copy),
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.primary,
+                        fontWeight = FontWeight.Medium,
+                        textAlign = TextAlign.Center,
+                    )
+                }
+            }
+            items(options, key = { it.first }) { (amount, title, summary) ->
+                SupportOptionCard(
+                    amount = amount,
+                    title = stringResource(title),
+                    summary = stringResource(summary),
+                    emphasized = amount == 3,
+                    onClick = { selectedAmount = amount },
+                )
+            }
+            item {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                    ),
+                ) {
+                    Column(
+                        Modifier.fillMaxWidth().padding(18.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        Text(stringResource(R.string.support_equal_features))
+                        Text(stringResource(R.string.support_no_benefits))
+                        Text(stringResource(R.string.support_external_payment))
+                    }
+                }
+            }
+            item {
+                Text(
+                    stringResource(R.string.support_optional),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            }
+        }
+    }
+
+    selectedAmount?.let { amount ->
+        AlertDialog(
+            onDismissRequest = { selectedAmount = null },
+            title = { Text(stringResource(R.string.support_confirm_title)) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(stringResource(R.string.alt_041, amount))
+                    Text(
+                        stringResource(R.string.alt_042),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        selectedAmount = null
+                        onOpenKoFi(amount)
+                    },
+                ) {
+                    Text(stringResource(R.string.open_ko_fi))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { selectedAmount = null }) {
+                    Text(stringResource(R.string.cancel))
+                }
+            },
+        )
+    }
+}
+
+@Composable
+private fun SupportOptionCard(
+    amount: Int,
+    title: String,
+    summary: String,
+    emphasized: Boolean,
+    onClick: () -> Unit,
+) {
+    val containerColor = if (emphasized) {
+        MaterialTheme.colorScheme.primary
+    } else {
+        MaterialTheme.colorScheme.surface
+    }
+    val contentColor = if (emphasized) {
+        MaterialTheme.colorScheme.onPrimary
+    } else {
+        MaterialTheme.colorScheme.onSurface
+    }
+    Card(
+        onClick = onClick,
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(18.dp),
+        colors = CardDefaults.cardColors(containerColor = containerColor),
+        border = if (emphasized) {
+            null
+        } else {
+            BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+        },
+    ) {
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 18.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text(
+                    title,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = contentColor,
+                )
+                Text(
+                    summary,
+                    color = if (emphasized) {
+                        MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.82f)
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
+                )
+            }
+            Text(
+                "$$amount",
+                style = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.Bold,
+                color = contentColor,
+            )
         }
     }
 }
@@ -856,7 +1182,10 @@ private fun LockScreen(
     }
 
     Column(
-        Modifier.fillMaxSize().padding(horizontal = 32.dp, vertical = 56.dp),
+        Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background)
+            .padding(horizontal = 32.dp, vertical = 56.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Spacer(Modifier.height(24.dp))
@@ -992,6 +1321,20 @@ private fun PinNumberButton(
         onClick = onClick,
         enabled = enabled,
         modifier = Modifier.size(58.dp),
+        colors = IconButtonDefaults.outlinedIconButtonColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+            contentColor = MaterialTheme.colorScheme.onSurface,
+            disabledContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+            disabledContentColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f),
+        ),
+        border = BorderStroke(
+            width = 1.dp,
+            color = if (enabled) {
+                MaterialTheme.colorScheme.outline
+            } else {
+                MaterialTheme.colorScheme.outline.copy(alpha = 0.38f)
+            },
+        ),
     ) {
         Text(
             digit.toString(),
@@ -1074,10 +1417,22 @@ internal data class DisplaySentence(
         get() = ReadingPosition(sentenceIndex, characterOffset)
 }
 
+internal data class ReadingItemViewport(
+    val key: Any,
+    val offset: Int,
+    val size: Int,
+)
+
 internal fun shouldScrollToReadingItem(
     targetKey: String,
-    visibleKeys: Collection<Any>,
-): Boolean = targetKey !in visibleKeys
+    visibleItems: Collection<ReadingItemViewport>,
+    viewportStartOffset: Int,
+    viewportEndOffset: Int,
+): Boolean {
+    val target = visibleItems.firstOrNull { it.key == targetKey } ?: return true
+    val targetEndOffset = target.offset + target.size
+    return target.offset < viewportStartOffset || targetEndOffset > viewportEndOffset
+}
 
 internal fun displaySentences(segment: DocumentSegment): List<DisplaySentence> {
     val result = mutableListOf<DisplaySentence>()

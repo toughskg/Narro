@@ -33,6 +33,26 @@
     <string name="app_language">앱 언어</string>
     <string name="app_language_summary">휴대폰 언어를 따릅니다. Android 13 이상은 시스템 설정에서 앱 언어를 별도로 선택할 수 있습니다.</string>
     <string name="backup_summary">문서와 일반 설정은 Android 기기 백업을 사용합니다. 문서가 많으면 백업 한도를 넘을 수 있습니다.</string>
+    <string name="information_and_support">정보 및 지원</string>
+    <string name="app_version">앱 버전</string>
+    <string name="app_version_value">%1$s (%2$d)</string>
+    <string name="support_narro">Narro 응원하기</string>
+    <string name="support_narro_summary">개발과 유지보수를 응원합니다.</string>
+    <string name="support_headline">Narro를 응원해 주세요</string>
+    <string name="support_description">여러분의 응원은 앱 개발과 유지보수에 큰 힘이 됩니다.</string>
+    <string name="support_emotional_copy">Narro와 함께한 시간이 괜찮았다면, 개발자의 다음 커피 한 잔에 작은 응원을 보태주세요.</string>
+    <string name="support_light_title">가볍게 응원하기</string>
+    <string name="support_light_summary">작지만 소중한 응원</string>
+    <string name="support_warm_title">따뜻하게 응원하기</string>
+    <string name="support_warm_summary">조금 더 따뜻한 응원</string>
+    <string name="support_strong_title">힘차게 응원하기</string>
+    <string name="support_strong_summary">Narro에 힘을 보태는 응원</string>
+    <string name="support_equal_features">• 응원 여부와 관계없이 모든 기능은 같습니다.</string>
+    <string name="support_no_benefits">• 별도의 기능이나 디지털 혜택은 제공되지 않습니다.</string>
+    <string name="support_external_payment">• 결제는 Ko-fi의 외부 페이지에서 진행됩니다.</string>
+    <string name="support_optional">응원은 언제든 선택할 수 있습니다.</string>
+    <string name="support_confirm_title">Ko-fi에서 응원하기</string>
+    <string name="open_ko_fi">Ko-fi로 이동</string>
     <string name="pin_title">PIN 입력</string>
     <string name="pin_create_title">4자리 PIN 만들기</string>
     <string name="pin_confirm_title">PIN 확인</string>
@@ -66,6 +86,7 @@
     <string name="msg_031">다른 미디어가 재생되어 읽기를 잠시 멈췄습니다.</string>
     <string name="msg_032">다른 미디어 재생이 끝나 읽기를 계속합니다.</string>
     <string name="msg_036">이어폰 또는 오디오 기기가 분리되어 읽기를 중지했습니다.</string>
+    <string name="msg_056">응원 페이지를 준비 중입니다.</string>
     <string name="alt_001">파일의 문자 인코딩을 확인할 수 없습니다.</string>
     <string name="alt_002">UTF-8, EUC-KR, UTF-16 텍스트 파일만 지원합니다.</string>
     <string name="alt_003">파일에 읽을 내용이 없습니다.</string>
@@ -73,6 +94,8 @@
     <string name="alt_005">20 MiB보다 큰 파일은 가져올 수 없습니다.</string>
     <string name="alt_006">로컬 문서 저장 한도는 200 MiB입니다.</string>
     <string name="alt_007">내용이 같은 문서가 이미 있습니다.</string>
+    <string name="alt_041">$%1$d로 Narro를 응원하시겠습니까?</string>
+    <string name="alt_042">계속하면 Ko-fi 결제 페이지가 열립니다.</string>
     <string name="err_001">시스템 오류가 발생했습니다.</string>
     <string name="err_002">파일을 열 수 없습니다.</string>
     <string name="err_003">파일을 변환할 수 없습니다.</string>
@@ -81,4 +104,5 @@
     <string name="err_010">음성 엔진을 초기화할 수 없습니다.</string>
     <string name="err_011">이 언어의 음성 데이터가 설치되어 있지 않습니다.</string>
     <string name="err_017">문서를 삭제할 수 없습니다.</string>
+    <string name="err_061">응원 페이지를 열 수 없습니다. 잠시 후 다시 시도해 주세요.</string>
 </resources>

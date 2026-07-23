@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="narro_icon_background">#FFFFFF</color>
+    <style name="Theme.Narro" parent="android:style/Theme.Material.NoActionBar">
+        <item name="android:fontFamily">sans</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:navigationBarColor">#FF101413</item>
+        <item name="android:statusBarColor">#FF101413</item>
+        <item name="android:windowActionModeOverlay">true</item>
+    </style>
+</resources>

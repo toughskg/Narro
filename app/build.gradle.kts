@@ -4,6 +4,8 @@ plugins {
     alias(libs.plugins.kotlin.compose)
 }
 
+val koFiUrl = providers.gradleProperty("NARRO_KO_FI_URL").orNull.orEmpty()
+
 android {
     namespace = "com.narro.app"
     compileSdk = 36
@@ -16,6 +18,11 @@ android {
         versionName = "0.1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        buildConfigField(
+            "String",
+            "KO_FI_URL",
+            "\"${koFiUrl.replace("\\", "\\\\").replace("\"", "\\\"")}\"",
+        )
     }
 
     androidResources.localeFilters += listOf("en", "ko")
