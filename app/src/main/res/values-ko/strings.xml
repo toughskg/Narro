@@ -8,6 +8,7 @@
     <string name="settings_title">설정</string>
     <string name="bookmarks_title">북마크</string>
     <string name="reader_title">읽기</string>
+    <string name="current_reading_position">현재 읽는 위치로 이동</string>
     <string name="back">뒤로</string>
     <string name="play">재생</string>
     <string name="pause">일시정지</string>
@@ -40,6 +41,8 @@
     <string name="pin_mismatch">PIN이 일치하지 않습니다.</string>
     <string name="pin_invalid">PIN은 숫자 4자리로 입력해 주세요.</string>
     <string name="pin_failed">PIN이 올바르지 않습니다.</string>
+    <string name="fingerprint_unlock">지문으로 잠금 해제</string>
+    <string name="delete_pin_digit">마지막 숫자 지우기</string>
     <plurals name="pin_locked_seconds">
         <item quantity="other">%1$d초 후에 다시 시도해 주세요.</item>
     </plurals>

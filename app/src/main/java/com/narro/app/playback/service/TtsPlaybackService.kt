@@ -200,6 +200,8 @@ class TtsPlaybackService : Service(), TextToSpeech.OnInitListener {
                 utterances[id] = UtteranceMeta(
                     sessionId = currentSessionId.orEmpty(),
                     segmentIndex = segment.index,
+                    startSentenceIndex = chunk.startSentenceIndex,
+                    startCharacterOffset = chunk.startCharacterOffset,
                     endSentenceIndex = chunk.endSentenceIndex,
                     endCharacterOffset = chunk.endCharacterOffset,
                 )
@@ -222,6 +224,7 @@ class TtsPlaybackService : Service(), TextToSpeech.OnInitListener {
         var sentence = segment.startSentenceIndex
         var chunkStartSentence = sentence
         var offset = segment.startCharacterOffset
+        var chunkStartOffset = offset
         var chunkEndOffset = offset
         var index = 0
 
@@ -230,9 +233,16 @@ class TtsPlaybackService : Service(), TextToSpeech.OnInitListener {
                 builder.clear()
                 return false
             }
-            chunks += SpeechChunk(builder.toString(), chunkStartSentence, sentence, chunkEndOffset)
+            chunks += SpeechChunk(
+                builder.toString(),
+                chunkStartSentence,
+                chunkStartOffset,
+                sentence,
+                chunkEndOffset,
+            )
             builder.clear()
             chunkStartSentence = sentence + 1
+            chunkStartOffset = chunkEndOffset
             return true
         }
 
@@ -254,7 +264,15 @@ class TtsPlaybackService : Service(), TextToSpeech.OnInitListener {
     }
 
     private val listener = object : UtteranceProgressListener() {
-        override fun onStart(utteranceId: String?) = Unit
+        override fun onStart(utteranceId: String?) {
+            val meta = utteranceId?.let(utterances::get) ?: return
+            if (meta.sessionId != currentSessionId) return
+            currentPosition = utteranceStartPosition(
+                meta.startSentenceIndex,
+                meta.startCharacterOffset,
+            )
+            PlaybackStateStore.update { it.copy(position = currentPosition) }
+        }
 
         override fun onDone(utteranceId: String?) {
             val meta = utteranceId?.let(utterances::remove) ?: return
@@ -485,6 +503,8 @@ class TtsPlaybackService : Service(), TextToSpeech.OnInitListener {
     private data class UtteranceMeta(
         val sessionId: String,
         val segmentIndex: Int,
+        val startSentenceIndex: Int,
+        val startCharacterOffset: Long,
         val endSentenceIndex: Int,
         val endCharacterOffset: Long,
     )
@@ -492,6 +512,7 @@ class TtsPlaybackService : Service(), TextToSpeech.OnInitListener {
     private data class SpeechChunk(
         val text: String,
         val startSentenceIndex: Int,
+        val startCharacterOffset: Long,
         val endSentenceIndex: Int,
         val endCharacterOffset: Long,
     )
@@ -531,3 +552,8 @@ class TtsPlaybackService : Service(), TextToSpeech.OnInitListener {
         }
     }
 }
+
+internal fun utteranceStartPosition(
+    sentenceIndex: Int,
+    characterOffset: Long,
+): ReadingPosition = ReadingPosition(sentenceIndex, characterOffset)

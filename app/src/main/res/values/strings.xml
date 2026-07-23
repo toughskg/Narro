@@ -8,6 +8,7 @@
     <string name="settings_title">Settings</string>
     <string name="bookmarks_title">Bookmarks</string>
     <string name="reader_title">Reader</string>
+    <string name="current_reading_position">Go to current reading position</string>
     <string name="back">Back</string>
     <string name="play">Play</string>
     <string name="pause">Pause</string>
@@ -40,6 +41,8 @@
     <string name="pin_mismatch">The PINs do not match.</string>
     <string name="pin_invalid">Enter exactly 4 digits.</string>
     <string name="pin_failed">Incorrect PIN.</string>
+    <string name="fingerprint_unlock">Unlock with fingerprint</string>
+    <string name="delete_pin_digit">Delete last digit</string>
     <plurals name="pin_locked_seconds">
         <item quantity="one">Try again in %1$d second.</item>
         <item quantity="other">Try again in %1$d seconds.</item>

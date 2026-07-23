@@ -6,7 +6,11 @@ import android.provider.Settings
 import android.text.format.Formatter
 import androidx.activity.compose.BackHandler
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.keyframes
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -14,6 +18,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -30,6 +35,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.Backspace
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Add
@@ -37,6 +43,9 @@ import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.BookmarkAdd
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.ErrorOutline
+import androidx.compose.material.icons.filled.Fingerprint
+import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Settings
@@ -46,13 +55,16 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedIconButton
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SmallFloatingActionButton
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -73,12 +85,16 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -100,6 +116,14 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 private enum class Destination { DOCUMENTS, READER, BOOKMARKS, SETTINGS }
+
+internal enum class LockToggleAction {
+    REGISTER_NEW_PIN,
+    CLEAR_PIN,
+}
+
+internal fun lockToggleAction(enabled: Boolean): LockToggleAction =
+    if (enabled) LockToggleAction.REGISTER_NEW_PIN else LockToggleAction.CLEAR_PIN
 
 @Composable
 fun NarroApp(
@@ -150,8 +174,16 @@ fun NarroApp(
         destination = Destination.DOCUMENTS
     }
 
-    Scaffold(snackbarHost = { SnackbarHost(snackbar) }) { outerPadding ->
-        Box(Modifier.padding(outerPadding)) {
+    Scaffold(
+        snackbarHost = {
+            SnackbarHost(
+                hostState = snackbar,
+                modifier = Modifier.navigationBarsPadding().imePadding(),
+            )
+        },
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
+    ) { outerPadding ->
+        Box(Modifier.fillMaxSize().padding(outerPadding)) {
             when (destination) {
                 Destination.DOCUMENTS -> DocumentsScreen(
                     documents = documents,
@@ -174,7 +206,6 @@ fun NarroApp(
                     } else {
                         reader.position
                     },
-                    speechRate = settings.speechRate,
                     onBack = {
                         TtsPlaybackService.command(context, TtsPlaybackService.ACTION_STOP_SAVE)
                         destination = Destination.DOCUMENTS
@@ -219,8 +250,10 @@ fun NarroApp(
                     onBack = { destination = Destination.DOCUMENTS },
                     onSpeechRate = viewModel::setSpeechRate,
                     onLockToggle = { enabled ->
-                        if (enabled && !viewModel.hasPin()) showPinRegistration = true
-                        else viewModel.setLockEnabled(enabled)
+                        when (lockToggleAction(enabled)) {
+                            LockToggleAction.REGISTER_NEW_PIN -> showPinRegistration = true
+                            LockToggleAction.CLEAR_PIN -> viewModel.clearPin()
+                        }
                     },
                     onBiometricToggle = { enabled ->
                         if (!enabled) viewModel.setBiometricEnabled(false)
@@ -401,7 +434,6 @@ private fun ReaderScreen(
     state: ReaderUiState,
     playbackStatus: PlaybackStatus,
     playbackPosition: ReadingPosition,
-    speechRate: Float,
     onBack: () -> Unit,
     onPlayPause: () -> Unit,
     onBookmark: () -> Unit,
@@ -410,8 +442,14 @@ private fun ReaderScreen(
 ) {
     val document = state.document
     val listState = rememberLazyListState()
-    LaunchedEffect(state.centerSegmentIndex, state.segments) {
-        val item = state.segments.indexOfFirst { it.index == state.centerSegmentIndex }
+    val displayItems = remember(state.segments) { state.segments.flatMap(::displaySentences) }
+    var locateRequest by remember { mutableStateOf(0) }
+    LaunchedEffect(state.centerSegmentIndex, state.segments, locateRequest) {
+        val item = displayItems.indexOfFirst {
+            playbackPosition.sentenceIndex == it.sentenceIndex
+        }.takeIf { it >= 0 } ?: displayItems.indexOfFirst {
+            it.segmentIndex == state.centerSegmentIndex
+        }
         if (item >= 0) listState.scrollToItem(item)
     }
     Scaffold(
@@ -438,7 +476,6 @@ private fun ReaderScreen(
                 progress = document?.let {
                     (playbackPosition.sentenceIndex.toFloat() / it.totalSentenceCount.coerceAtLeast(1)).coerceIn(0f, 1f)
                 } ?: 0f,
-                speechRate = speechRate,
                 onPlayPause = onPlayPause,
                 onPrevious = onPreviousSegment,
                 onNext = onNextSegment,
@@ -458,15 +495,35 @@ private fun ReaderScreen(
                         .fillMaxWidth()
                         .widthIn(max = 720.dp),
                     contentPadding = PaddingValues(horizontal = 20.dp, vertical = 24.dp),
-                    verticalArrangement = Arrangement.spacedBy(24.dp),
+                    verticalArrangement = Arrangement.Top,
                 ) {
-                    items(state.segments, key = { it.index }) { segment ->
+                    items(displayItems, key = { "${it.segmentIndex}:${it.sentenceIndex}" }) { item ->
                         Text(
-                            text = highlightedSegment(segment, playbackPosition.sentenceIndex),
+                            text = if (item.sentenceIndex == playbackPosition.sentenceIndex) {
+                                buildAnnotatedString {
+                                    append(item.text)
+                                    addStyle(
+                                        SpanStyle(background = Color(0x66FFE082)),
+                                        0,
+                                        item.text.length,
+                                    )
+                                }
+                            } else {
+                                AnnotatedString(item.text)
+                            },
                             fontSize = 19.sp,
                             lineHeight = 30.sp,
                         )
                     }
+                }
+                SmallFloatingActionButton(
+                    onClick = { locateRequest++ },
+                    modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp),
+                ) {
+                    Icon(
+                        Icons.Default.MyLocation,
+                        stringResource(R.string.current_reading_position),
+                    )
                 }
             }
         }
@@ -479,7 +536,6 @@ private fun ReaderControls(
     canGoNext: Boolean,
     playing: Boolean,
     progress: Float,
-    speechRate: Float,
     onPlayPause: () -> Unit,
     onPrevious: () -> Unit,
     onNext: () -> Unit,
@@ -495,20 +551,16 @@ private fun ReaderControls(
                 IconButton(onClick = onPrevious, enabled = canGoPrevious) {
                     Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, stringResource(R.string.back))
                 }
-                Button(onClick = onPlayPause, modifier = Modifier.height(56.dp)) {
-                    Icon(if (playing) Icons.Default.Pause else Icons.Default.PlayArrow, null)
-                    Spacer(Modifier.width(8.dp))
-                    Text(stringResource(if (playing) R.string.pause else R.string.play))
+                FilledIconButton(onClick = onPlayPause, modifier = Modifier.size(56.dp)) {
+                    Icon(
+                        if (playing) Icons.Default.Pause else Icons.Default.PlayArrow,
+                        stringResource(if (playing) R.string.pause else R.string.play),
+                    )
                 }
                 IconButton(onClick = onNext, enabled = canGoNext) {
                     Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, stringResource(R.string.reader_title))
                 }
             }
-            Text(
-                stringResource(R.string.speech_rate_value, speechRate),
-                modifier = Modifier.align(Alignment.CenterHorizontally),
-                style = MaterialTheme.typography.labelSmall,
-            )
         }
     }
 }
@@ -660,57 +712,231 @@ private fun LockScreen(
 ) {
     var pin by rememberSaveable { mutableStateOf("") }
     var error by remember { mutableStateOf<String?>(null) }
+    var verifying by remember { mutableStateOf(false) }
+    var shakeTrigger by remember { mutableStateOf(0) }
     var biometricRequested by rememberSaveable { mutableStateOf(false) }
+    val shakeOffset = remember { Animatable(0f) }
     val scope = rememberCoroutineScope()
     val resources = LocalResources.current
+    val haptics = LocalHapticFeedback.current
     val failedText = stringResource(R.string.pin_failed)
     val unavailableText = stringResource(R.string.unknown_error)
+
+    fun requestBiometric() {
+        authenticateBiometric { if (it) onUnlocked() }
+    }
+
+    fun submitPin(value: String) {
+        if (value.length != 4 || verifying) return
+        verifying = true
+        scope.launch {
+            when (val result = verifyPin(value)) {
+                PinVerification.Success -> onUnlocked()
+                is PinVerification.Failed -> {
+                    error = failedText
+                    shakeTrigger++
+                    haptics.performHapticFeedback(HapticFeedbackType.Reject)
+                }
+                is PinVerification.Locked -> {
+                    error = resources.getQuantityString(
+                        R.plurals.pin_locked_seconds,
+                        result.remainingSeconds.toInt(),
+                        result.remainingSeconds,
+                    )
+                    shakeTrigger++
+                    haptics.performHapticFeedback(HapticFeedbackType.Reject)
+                }
+                PinVerification.Unavailable -> error = unavailableText
+            }
+            pin = ""
+            verifying = false
+        }
+    }
+
+    fun enterDigit(digit: Int) {
+        if (verifying) return
+        error = null
+        val next = appendPinDigit(pin, digit)
+        pin = next
+        if (next.length == 4) submitPin(next)
+    }
 
     LaunchedEffect(biometricEnabled) {
         if (biometricEnabled && !biometricRequested) {
             biometricRequested = true
-            authenticateBiometric { if (it) onUnlocked() }
+            requestBiometric()
         }
     }
 
-    Column(
-        Modifier.fillMaxSize().imePadding().padding(32.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center,
-    ) {
-        Text(stringResource(R.string.app_name), style = MaterialTheme.typography.displaySmall)
-        Spacer(Modifier.height(32.dp))
-        Text(stringResource(R.string.pin_title), style = MaterialTheme.typography.titleLarge)
-        TextField(
-            value = pin,
-            onValueChange = { value -> pin = value.filter(Char::isDigit).take(4); error = null },
-            label = { Text(stringResource(R.string.pin_hint)) },
-            isError = error != null,
-            supportingText = { error?.let { Text(it) } },
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
-            singleLine = true,
-        )
-        Spacer(Modifier.height(16.dp))
-        Button(
-            onClick = {
-                scope.launch {
-                    when (val result = verifyPin(pin)) {
-                        PinVerification.Success -> onUnlocked()
-                        is PinVerification.Failed -> error = failedText
-                        is PinVerification.Locked -> error = resources.getQuantityString(
-                            R.plurals.pin_locked_seconds,
-                            result.remainingSeconds.toInt(),
-                            result.remainingSeconds,
-                        )
-                        PinVerification.Unavailable -> error = unavailableText
-                    }
-                    pin = ""
-                }
+    LaunchedEffect(shakeTrigger) {
+        if (shakeTrigger == 0) return@LaunchedEffect
+        shakeOffset.snapTo(0f)
+        shakeOffset.animateTo(
+            targetValue = 0f,
+            animationSpec = keyframes {
+                durationMillis = 450
+                -20f at 45
+                20f at 90
+                -14f at 145
+                14f at 200
+                -8f at 275
+                8f at 350
+                0f at 450
             },
-            enabled = pin.length == 4,
-        ) { Text(stringResource(R.string.pin_unlock)) }
+        )
+    }
+
+    Column(
+        Modifier.fillMaxSize().padding(horizontal = 32.dp, vertical = 56.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Spacer(Modifier.height(24.dp))
+        Text(
+            stringResource(R.string.app_name),
+            color = MaterialTheme.colorScheme.primary,
+            fontSize = 40.sp,
+            fontWeight = FontWeight.Bold,
+        )
+        Spacer(Modifier.height(24.dp))
+        Column(
+            modifier = Modifier.graphicsLayer { translationX = shakeOffset.value },
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(22.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                repeat(4) { index ->
+                    Box(
+                        Modifier
+                            .size(14.dp)
+                            .then(
+                                if (index < pin.length) {
+                                    Modifier.background(MaterialTheme.colorScheme.primary, CircleShape)
+                                } else {
+                                    Modifier.border(
+                                        1.5.dp,
+                                        MaterialTheme.colorScheme.onSurfaceVariant,
+                                        CircleShape,
+                                    )
+                                },
+                            ),
+                    )
+                }
+            }
+            Box(
+                Modifier.fillMaxWidth().height(52.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                error?.let {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        Icon(
+                            Icons.Default.ErrorOutline,
+                            null,
+                            tint = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.size(18.dp),
+                        )
+                        Text(
+                            it,
+                            color = MaterialTheme.colorScheme.error,
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                    }
+                }
+            }
+        }
+        Column(
+            modifier = Modifier.width(220.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            listOf(
+                listOf(1, 2, 3),
+                listOf(4, 5, 6),
+                listOf(7, 8, 9),
+            ).forEach { row ->
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    row.forEach { digit ->
+                        PinNumberButton(
+                            digit = digit,
+                            enabled = !verifying,
+                            onClick = { enterDigit(digit) },
+                        )
+                    }
+                }
+            }
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.Top,
+            ) {
+                if (biometricEnabled) {
+                    FilledIconButton(
+                        onClick = ::requestBiometric,
+                        modifier = Modifier.size(58.dp),
+                    ) {
+                        Icon(
+                            Icons.Default.Fingerprint,
+                            stringResource(R.string.biometric_unlock),
+                            modifier = Modifier.size(32.dp),
+                        )
+                    }
+                } else {
+                    Spacer(Modifier.size(58.dp))
+                }
+                PinNumberButton(
+                    digit = 0,
+                    enabled = !verifying,
+                    onClick = { enterDigit(0) },
+                )
+                OutlinedIconButton(
+                    onClick = {
+                        error = null
+                        pin = deletePinDigit(pin)
+                    },
+                    enabled = pin.isNotEmpty() && !verifying,
+                    modifier = Modifier.size(58.dp),
+                    border = null,
+                ) {
+                    Icon(
+                        Icons.AutoMirrored.Filled.Backspace,
+                        stringResource(R.string.delete_pin_digit),
+                    )
+                }
+            }
+        }
     }
 }
+
+@Composable
+private fun PinNumberButton(
+    digit: Int,
+    enabled: Boolean,
+    onClick: () -> Unit,
+) {
+    OutlinedIconButton(
+        onClick = onClick,
+        enabled = enabled,
+        modifier = Modifier.size(58.dp),
+    ) {
+        Text(
+            digit.toString(),
+            style = MaterialTheme.typography.headlineSmall,
+        )
+    }
+}
+
+internal fun appendPinDigit(pin: String, digit: Int): String {
+    if (digit !in 0..9 || pin.length >= 4) return pin
+    return pin + digit
+}
+
+internal fun deletePinDigit(pin: String): String = pin.dropLast(1)
 
 @Composable
 private fun PinRegistrationDialog(
@@ -766,36 +992,42 @@ private fun importStageLabel(stage: ImportStage): String = stringResource(
     },
 )
 
-private fun highlightedSegment(segment: DocumentSegment, sentenceIndex: Int): AnnotatedString {
-    if (sentenceIndex !in segment.startSentenceIndex..segment.endSentenceIndex) {
-        return AnnotatedString(segment.text)
-    }
-    val target = sentenceIndex - segment.startSentenceIndex
-    var current = 0
-    var start = 0
-    var end = segment.text.length
+private data class DisplaySentence(
+    val segmentIndex: Int,
+    val sentenceIndex: Int,
+    val text: String,
+)
+
+private fun displaySentences(segment: DocumentSegment): List<DisplaySentence> {
+    val result = mutableListOf<DisplaySentence>()
+    val text = StringBuilder()
+    var sentenceIndex = segment.startSentenceIndex
+    var hasContent = false
+    var codePoints = 0
     var index = 0
+
+    fun emit() {
+        if (!hasContent) return
+        result += DisplaySentence(segment.index, sentenceIndex, text.toString())
+        text.clear()
+        sentenceIndex++
+        hasContent = false
+        codePoints = 0
+    }
+
     while (index < segment.text.length) {
         val cp = segment.text.codePointAt(index)
-        val next = index + Character.charCount(cp)
+        text.appendCodePoint(cp)
+        codePoints++
+        if (!Character.isWhitespace(cp)) hasContent = true
         val boundary = cp == '.'.code || cp == '!'.code || cp == '?'.code || cp == '\n'.code ||
-            cp == 0x3002 || cp == 0xFF01 || cp == 0xFF1F ||
-            segment.text.codePointCount(start, next) >= 3_000
-        if (current == target && start == 0 && current > 0) start = index
-        if (boundary) {
-            if (current == target) {
-                end = next
-                break
-            }
-            current++
-            start = next
-        }
-        index = next
+            cp == 0x3002 || cp == 0xFF01 || cp == 0xFF1F || codePoints >= 3_000
+        if (boundary) emit()
+        index += Character.charCount(cp)
     }
-    return buildAnnotatedString {
-        append(segment.text)
-        if (start in 0 until end && end <= segment.text.length) {
-            addStyle(SpanStyle(background = Color(0x66FFE082)), start, end)
-        }
+    emit()
+    if (result.isEmpty() && text.isNotEmpty()) {
+        result += DisplaySentence(segment.index, segment.startSentenceIndex, text.toString())
     }
+    return result
 }
