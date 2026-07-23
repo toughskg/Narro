@@ -141,6 +141,84 @@
 - 해당 언어 음성이 설치되지 않았으면 임의의 다른 언어로 읽지 않고 설치·변경 안내를 표시한다.
 - 언어 자동 감지는 보조 제안으로만 사용할 수 있으며 사용자 선택을 덮어쓰지 않는다.
 
+### 1.4 프로젝트 폴더 구조
+
+MVP는 빌드와 의존성 관리를 단순하게 유지하기 위해 단일 `app` 모듈로 시작한다. 패키지는 기능과 책임을 기준으로 분리하며, 기능 규모나 개발 인원이 커질 때 아래 패키지를 동일한 경계의 Gradle 모듈로 전환할 수 있게 한다. 예시 기본 패키지는 `com.narro.app`이며 실제 애플리케이션 ID 확정 시 일괄 변경한다.
+
+```text
+Narro/
+├─ app/
+│  ├─ src/
+│  │  ├─ main/
+│  │  │  ├─ java/com/narro/app/
+│  │  │  │  ├─ NarroApplication.kt
+│  │  │  │  ├─ MainActivity.kt
+│  │  │  │  ├─ navigation/              # 화면 경로, 내비게이션 그래프
+│  │  │  │  ├─ feature/
+│  │  │  │  │  ├─ lock/                 # PIN·생체인증 화면과 상태
+│  │  │  │  │  ├─ documents/            # 문서 목록, 가져오기, 삭제
+│  │  │  │  │  ├─ reader/               # 본문 표시, 하이라이트, 재생 제어
+│  │  │  │  │  ├─ bookmarks/            # 북마크 목록과 이동
+│  │  │  │  │  └─ settings/             # 음성·속도·잠금·앱 언어 설정
+│  │  │  │  ├─ domain/
+│  │  │  │  │  ├─ model/                # UI·저장 방식에 독립적인 모델
+│  │  │  │  │  ├─ repository/           # Repository 인터페이스
+│  │  │  │  │  └─ usecase/              # 가져오기, 삭제, 재생, 북마크 규칙
+│  │  │  │  ├─ data/
+│  │  │  │  │  ├─ local/
+│  │  │  │  │  │  ├─ db/                # Room DB, Entity, DAO, Migration
+│  │  │  │  │  │  ├─ file/              # filesDir I/O와 임시 파일 관리
+│  │  │  │  │  │  └─ datastore/         # 사용자 설정과 잠금 제한 상태
+│  │  │  │  │  ├─ parser/               # 인코딩 판별·변환·문장/구간 인덱싱
+│  │  │  │  │  ├─ backup/               # Auto Backup 포함/제외 정책
+│  │  │  │  │  └─ repository/           # Domain Repository 구현체
+│  │  │  │  ├─ playback/
+│  │  │  │  │  ├─ service/              # TTS Foreground Service
+│  │  │  │  │  ├─ tts/                  # TTS 초기화, 분할, 큐, 콜백
+│  │  │  │  │  ├─ media/                # MediaSession, 알림, 오디오 포커스
+│  │  │  │  │  └─ model/                # 재생 명령과 서비스 상태
+│  │  │  │  ├─ security/                 # PIN KDF, Keystore, 생체인증 연결
+│  │  │  │  ├─ core/
+│  │  │  │  │  ├─ ui/                   # 테마와 공통 Compose 컴포넌트
+│  │  │  │  │  ├─ util/                 # 공통 유틸리티
+│  │  │  │  │  └─ dispatchers/          # Coroutine Dispatcher 주입
+│  │  │  │  └─ di/                       # 객체 생성과 의존성 연결
+│  │  │  ├─ res/
+│  │  │  │  ├─ values/strings.xml        # 영어 기본·폴백 메시지
+│  │  │  │  ├─ values-ko/strings.xml     # 한국어 메시지
+│  │  │  │  ├─ values/themes.xml
+│  │  │  │  ├─ drawable/                 # 언어 비종속 이미지·아이콘
+│  │  │  │  └─ xml/
+│  │  │  │     ├─ backup_rules.xml
+│  │  │  │     └─ data_extraction_rules.xml
+│  │  │  └─ AndroidManifest.xml
+│  │  ├─ test/                            # JVM 단위 테스트, main 패키지 구조 반영
+│  │  └─ androidTest/                     # Room·UI·서비스 통합 테스트
+│  ├─ schemas/                            # Room 스키마와 Migration 검증 자료
+│  ├─ proguard-rules.pro
+│  └─ build.gradle.kts
+├─ gradle/
+│  └─ libs.versions.toml                  # 라이브러리·플러그인 버전 카탈로그
+├─ design/                                # 화면 설계 이미지
+├─ narro_design_v3.0.md                   # 통합 설계서
+├─ message_ko.md                          # 한국어 메시지 원본
+├─ message_en.md                          # 영어 메시지 원본
+├─ settings.gradle.kts
+└─ build.gradle.kts
+```
+
+#### 폴더 운영 규칙
+
+- `feature`는 화면, ViewModel, UI 상태와 이벤트를 기능별로 함께 둔다. 기능 간 화면 구현을 직접 참조하지 않고 `navigation` 또는 Domain 계약을 통해 연결한다.
+- `domain`은 Android UI, Room, 파일 API에 의존하지 않는다. Repository 인터페이스와 핵심 업무 규칙만 포함한다.
+- `data`는 파일, Room, DataStore, 파서 구현을 담당하며 Domain 인터페이스를 구현한다. UI가 DAO나 파일 구현체를 직접 호출하지 않는다.
+- `playback`은 Activity와 독립적으로 동작해야 하며 UI에는 서비스 구현체 대신 명령·상태 인터페이스를 노출한다.
+- `security`는 원본 PIN을 저장하거나 로그로 출력하지 않는다. 해시·salt·Keystore 접근을 다른 기능에서 직접 구현하지 않는다.
+- 공통 코드는 실제로 둘 이상의 기능에서 사용하는 경우에만 `core`로 이동한다. 기능 전용 코드를 미리 공통화하지 않는다.
+- `test`와 `androidTest`는 가능한 한 `main`의 패키지 경계를 동일하게 반영한다. 파서, 재생 상태 전이, PIN 제한 및 Room Migration은 구현과 함께 테스트를 추가한다.
+- `message_ko.md`와 `message_en.md`는 문구 검토용 기준 문서다. 빌드에서 사용하는 최종 문자열은 ID를 유지해 각 언어의 `strings.xml`로 반영하며 두 리소스의 ID·서식 인자 일치를 자동 검사한다.
+- 원본 문서, 변환 임시 파일, 인덱스 파일은 프로젝트 소스 폴더에 저장하지 않고 런타임의 앱 전용 `filesDir` 하위에서 문서 ID별로 격리한다.
+
 ---
 
 ## 2. 핵심 사용자 흐름
