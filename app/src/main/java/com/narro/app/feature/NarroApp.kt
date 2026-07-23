@@ -10,6 +10,7 @@ import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.keyframes
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -87,6 +88,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalResources
@@ -125,6 +127,25 @@ internal enum class LockToggleAction {
 internal fun lockToggleAction(enabled: Boolean): LockToggleAction =
     if (enabled) LockToggleAction.REGISTER_NEW_PIN else LockToggleAction.CLEAR_PIN
 
+internal fun shouldReturnToDocuments(
+    playbackStatus: PlaybackStatus,
+    playbackDocumentId: String?,
+    readerDocumentId: String?,
+): Boolean = playbackStatus == PlaybackStatus.COMPLETED &&
+    playbackDocumentId != null &&
+    playbackDocumentId == readerDocumentId
+
+internal fun canSelectReadingPosition(status: PlaybackStatus): Boolean = status !in setOf(
+    PlaybackStatus.INITIALIZING,
+    PlaybackStatus.PLAYING,
+    PlaybackStatus.PAUSED_BY_FOCUS,
+)
+
+internal fun playbackStartPosition(
+    selectedPosition: ReadingPosition?,
+    currentPosition: ReadingPosition,
+): ReadingPosition = selectedPosition ?: currentPosition
+
 @Composable
 fun NarroApp(
     viewModel: AppViewModel,
@@ -143,6 +164,7 @@ fun NarroApp(
     var destination by rememberSaveable { mutableStateOf(Destination.DOCUMENTS) }
     var lockState by rememberSaveable { mutableStateOf<Boolean?>(null) }
     var showPinRegistration by rememberSaveable { mutableStateOf(false) }
+    var selectedStartPosition by remember { mutableStateOf<ReadingPosition?>(null) }
 
     LaunchedEffect(Unit) {
         lockState = viewModel.initialLockRequired()
@@ -150,6 +172,14 @@ fun NarroApp(
             val text = message.argument?.let { resources.getString(message.resourceId, it) }
                 ?: resources.getString(message.resourceId)
             snackbar.showSnackbar(text)
+        }
+    }
+
+    LaunchedEffect(playback.status, playback.documentId, reader.document?.id) {
+        if (shouldReturnToDocuments(playback.status, playback.documentId, reader.document?.id)) {
+            selectedStartPosition = null
+            destination = Destination.DOCUMENTS
+            viewModel.acknowledgePlaybackCompletion()
         }
     }
 
@@ -191,6 +221,7 @@ fun NarroApp(
                     onImport = viewModel::import,
                     onCancelImport = viewModel::cancelImport,
                     onOpen = {
+                        selectedStartPosition = null
                         viewModel.openDocument(it.id)
                         destination = Destination.READER
                     },
@@ -201,18 +232,28 @@ fun NarroApp(
                 Destination.READER -> ReaderScreen(
                     state = reader,
                     playbackStatus = playback.status,
-                    playbackPosition = if (playback.documentId == reader.document?.id) {
+                    playbackPosition = selectedStartPosition ?: if (playback.documentId == reader.document?.id) {
                         playback.position
                     } else {
                         reader.position
                     },
                     onBack = {
+                        selectedStartPosition = null
                         TtsPlaybackService.command(context, TtsPlaybackService.ACTION_STOP_SAVE)
                         destination = Destination.DOCUMENTS
                     },
                     onPlayPause = {
                         val document = reader.document ?: return@ReaderScreen
-                        if (playback.documentId == document.id &&
+                        val selectedPosition = selectedStartPosition
+                        if (selectedPosition != null) {
+                            selectedStartPosition = null
+                            TtsPlaybackService.play(
+                                context,
+                                document.id,
+                                playbackStartPosition(selectedPosition, reader.position),
+                                settings.speechRate,
+                            )
+                        } else if (playback.documentId == document.id &&
                             playback.status in setOf(
                                 PlaybackStatus.PAUSED_BY_USER,
                                 PlaybackStatus.PAUSED_BY_FOCUS,
@@ -227,6 +268,11 @@ fun NarroApp(
                             TtsPlaybackService.play(context, document.id, reader.position, settings.speechRate)
                         }
                     },
+                    canSelectPosition = canSelectReadingPosition(playback.status),
+                    onSelectPosition = { position ->
+                        selectedStartPosition = position
+                        viewModel.selectReadingPosition(position)
+                    },
                     onBookmark = viewModel::addBookmark,
                     onPreviousSegment = { viewModel.loadSegment(reader.centerSegmentIndex - 1) },
                     onNextSegment = { viewModel.loadSegment(reader.centerSegmentIndex + 1) },
@@ -235,6 +281,7 @@ fun NarroApp(
                     bookmarks = bookmarks,
                     onBack = { destination = Destination.DOCUMENTS },
                     onOpen = {
+                        selectedStartPosition = null
                         viewModel.openDocument(
                             it.documentId,
                             ReadingPosition(it.sentenceIndex, it.characterOffset),
@@ -436,6 +483,8 @@ private fun ReaderScreen(
     playbackPosition: ReadingPosition,
     onBack: () -> Unit,
     onPlayPause: () -> Unit,
+    canSelectPosition: Boolean,
+    onSelectPosition: (ReadingPosition) -> Unit,
     onBookmark: () -> Unit,
     onPreviousSegment: () -> Unit,
     onNextSegment: () -> Unit,
@@ -444,13 +493,22 @@ private fun ReaderScreen(
     val listState = rememberLazyListState()
     val displayItems = remember(state.segments) { state.segments.flatMap(::displaySentences) }
     var locateRequest by remember { mutableStateOf(0) }
-    LaunchedEffect(state.centerSegmentIndex, state.segments, locateRequest) {
+    LaunchedEffect(
+        state.centerSegmentIndex,
+        state.segments,
+        playbackPosition.sentenceIndex,
+        locateRequest,
+    ) {
         val item = displayItems.indexOfFirst {
             playbackPosition.sentenceIndex == it.sentenceIndex
         }.takeIf { it >= 0 } ?: displayItems.indexOfFirst {
             it.segmentIndex == state.centerSegmentIndex
         }
-        if (item >= 0) listState.scrollToItem(item)
+        val targetKey = displayItems.getOrNull(item)?.key
+        val visibleKeys = listState.layoutInfo.visibleItemsInfo.map { it.key }
+        if (targetKey != null && shouldScrollToReadingItem(targetKey, visibleKeys)) {
+            listState.scrollToItem(item)
+        }
     }
     Scaffold(
         topBar = {
@@ -497,7 +555,7 @@ private fun ReaderScreen(
                     contentPadding = PaddingValues(horizontal = 20.dp, vertical = 24.dp),
                     verticalArrangement = Arrangement.Top,
                 ) {
-                    items(displayItems, key = { "${it.segmentIndex}:${it.sentenceIndex}" }) { item ->
+                    items(displayItems, key = DisplaySentence::key) { item ->
                         Text(
                             text = if (item.sentenceIndex == playbackPosition.sentenceIndex) {
                                 buildAnnotatedString {
@@ -510,6 +568,17 @@ private fun ReaderScreen(
                                 }
                             } else {
                                 AnnotatedString(item.text)
+                            },
+                            modifier = if (canSelectPosition) {
+                                Modifier.pointerInput(item.key) {
+                                    detectTapGestures(
+                                        onDoubleTap = {
+                                            onSelectPosition(item.position)
+                                        },
+                                    )
+                                }
+                            } else {
+                                Modifier
                             },
                             fontSize = 19.sp,
                             lineHeight = 30.sp,
@@ -992,25 +1061,45 @@ private fun importStageLabel(stage: ImportStage): String = stringResource(
     },
 )
 
-private data class DisplaySentence(
+internal data class DisplaySentence(
     val segmentIndex: Int,
     val sentenceIndex: Int,
+    val characterOffset: Long,
     val text: String,
-)
+) {
+    val key: String
+        get() = "$segmentIndex:$sentenceIndex"
 
-private fun displaySentences(segment: DocumentSegment): List<DisplaySentence> {
+    val position: ReadingPosition
+        get() = ReadingPosition(sentenceIndex, characterOffset)
+}
+
+internal fun shouldScrollToReadingItem(
+    targetKey: String,
+    visibleKeys: Collection<Any>,
+): Boolean = targetKey !in visibleKeys
+
+internal fun displaySentences(segment: DocumentSegment): List<DisplaySentence> {
     val result = mutableListOf<DisplaySentence>()
     val text = StringBuilder()
     var sentenceIndex = segment.startSentenceIndex
+    var sentenceStartOffset = segment.startCharacterOffset
+    var characterOffset = segment.startCharacterOffset
     var hasContent = false
     var codePoints = 0
     var index = 0
 
     fun emit() {
         if (!hasContent) return
-        result += DisplaySentence(segment.index, sentenceIndex, text.toString())
+        result += DisplaySentence(
+            segment.index,
+            sentenceIndex,
+            sentenceStartOffset,
+            text.toString(),
+        )
         text.clear()
         sentenceIndex++
+        sentenceStartOffset = characterOffset
         hasContent = false
         codePoints = 0
     }
@@ -1018,6 +1107,7 @@ private fun displaySentences(segment: DocumentSegment): List<DisplaySentence> {
     while (index < segment.text.length) {
         val cp = segment.text.codePointAt(index)
         text.appendCodePoint(cp)
+        characterOffset++
         codePoints++
         if (!Character.isWhitespace(cp)) hasContent = true
         val boundary = cp == '.'.code || cp == '!'.code || cp == '?'.code || cp == '\n'.code ||
@@ -1027,7 +1117,12 @@ private fun displaySentences(segment: DocumentSegment): List<DisplaySentence> {
     }
     emit()
     if (result.isEmpty() && text.isNotEmpty()) {
-        result += DisplaySentence(segment.index, segment.startSentenceIndex, text.toString())
+        result += DisplaySentence(
+            segment.index,
+            segment.startSentenceIndex,
+            segment.startCharacterOffset,
+            text.toString(),
+        )
     }
     return result
 }

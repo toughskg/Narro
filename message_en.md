@@ -16,7 +16,7 @@ msg_002=Enter the PIN again to confirm it.
 msg_003=PIN registered.
 msg_004=PIN changed.
 msg_005=App Lock turned on.
-msg_006=App Lock turned off.
+msg_006=App Lock turned off and the existing PIN was reset.
 msg_007=Register a PIN before turning on biometric unlock.
 msg_008=Authenticate to continue.
 msg_009=Biometric unlock turned on.
@@ -40,7 +40,7 @@ msg_026=Playback paused.
 msg_027=Resuming from where you paused.
 msg_028=Moved to your previous reading position.
 msg_029=This document will start from the beginning.
-msg_030=You have reached the end of the document.
+msg_030=You have reached the end of the document. Returning to Documents.
 msg_031=Narro paused because another app started playing audio.
 msg_032=Audio is available again. Resuming playback.
 msg_033=Playback stopped because your audio device was disconnected.
@@ -84,7 +84,7 @@ alt_010=Cancel the import? Content being processed won’t be saved.
 alt_011=Delete %1$s?
 alt_012=Deleting this document also removes its reading position and bookmarks.
 alt_013=Deleted documents can’t be recovered.
-alt_014=If you turn off App Lock, Narro won’t ask for a PIN when it opens.
+alt_014=Turning off App Lock resets the existing PIN and biometric setting. You must register a new PIN when turning it on again.
 alt_015=If you forget your PIN, you must clear the app data to use Narro again.
 alt_016=After 5 incorrect PIN attempts, you can’t try again for 30 seconds.
 alt_017=Incorrect PIN. Try again.
@@ -189,5 +189,5 @@ err_060=An unknown error occurred. Restart the app.
 - Use `err_001` and `err_060` only as final fallbacks when no specific error applies.
 - Log the displayed message ID with the internal error code, but never show stack traces or file paths to the user.
 - Replace transient progress messages in the same area instead of stacking snackbars.
-- Require confirmation for deletion, disabling App Lock, and importing duplicates.
+- Require confirmation for deletion and duplicate imports. Turning off App Lock applies immediately and must clearly state that the PIN is reset.
 - For consistency failures such as `err_046`, offer a retry and write a diagnostic log.

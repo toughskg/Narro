@@ -146,6 +146,20 @@ class AppViewModel(private val graph: AppGraph) : ViewModel() {
         }
     }
 
+    fun selectReadingPosition(position: ReadingPosition) {
+        mutableReader.value = mutableReader.value.copy(position = position)
+    }
+
+    fun acknowledgePlaybackCompletion() {
+        PlaybackStateStore.update { snapshot ->
+            if (snapshot.status == PlaybackStatus.COMPLETED) {
+                snapshot.copy(sessionId = null, status = PlaybackStatus.STOPPED)
+            } else {
+                snapshot
+            }
+        }
+    }
+
     private suspend fun loadWindowForSentence(sentenceIndex: Int) {
         val document = mutableReader.value.document ?: return
         val center = graph.documents.findSegmentIndex(document.id, sentenceIndex)

@@ -1,6 +1,6 @@
 # Narro
 
-Narro는 단말의 텍스트 파일을 Android 시스템 음성으로 읽어 주는 Kotlin·Jetpack Compose 앱입니다. 현재 저장소에는 설계서 v0.3을 기준으로 동작하는 Android MVP가 포함되어 있습니다.
+Narro는 단말의 텍스트 파일을 Android 시스템 음성으로 읽어 주는 Kotlin·Jetpack Compose 앱입니다. 현재 저장소에는 설계서 v0.4를 기준으로 동작하는 Android MVP가 포함되어 있습니다.
 
 ## 구현 범위
 
@@ -12,7 +12,10 @@ Narro는 단말의 텍스트 파일을 Android 시스템 음성으로 읽어 주
 - Foreground Service와 Android 시스템 TTS를 이용한 백그라운드 재생
 - 오디오 포커스 상실, 출력 장치 분리, 알림 재생 제어 처리
 - 정상 중지 시 마지막 완료 위치 저장 및 문서 재진입 시 위치 복원
-- 4자리 PIN, PBKDF2-HMAC-SHA-256, Android Keystore 기반 앱 잠금
+- 현재 발화 문장 자동 추적, 현 위치 이동, 미재생 상태의 문장 더블 탭 시작 위치 선택
+- 문서 마지막 발화 완료 후 진행률을 저장하고 문서 목록으로 자동 이동
+- 4자리 PIN, Android Keystore HMAC-SHA-256 기반 즉시 검증, 기존 PBKDF2 PIN 자동 전환
+- 앱 잠금 해제 시 PIN·실패 제한·PIN 보안 키 초기화, 재활성화 시 새 PIN 등록
 - 선택적 생체인증, 읽기 속도 설정
 - Android Auto Backup 규칙과 보안 데이터 백업 제외
 - 시스템 언어 및 Android 앱 언어 설정을 따르는 영어·한국어 UI
@@ -55,7 +58,7 @@ app/src/main/java/com/narro/app/
 ├─ domain/       # 앱 모델과 저장소 계약
 ├─ feature/      # Compose 화면과 화면 상태
 ├─ playback/     # TTS Foreground Service와 재생 상태
-├─ security/     # PIN 파생키와 Keystore 저장
+├─ security/     # PIN 검증 레코드와 Keystore HMAC·암호화 키
 └─ core/ui/      # 공통 테마
 ```
 
